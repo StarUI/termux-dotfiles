@@ -1,0 +1,243 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Switch between alternate Termux prefixes.
+##  Mostly used for testing stuff.
+##
+##  Dependencies: bash, coreutils, curl, findutils, gawk, unzip.
+##
+
+set -e
+
+# API 24 ARM bootstrap.
+ENV_32BIT_PATH="/data/data/com.termux/files/usr32"
+BOOT_32BIT_URL="https://termux.org/bootstrap-arm.zip"
+
+# API 24 AArch64 bootstrap.
+ENV_64BIT_PATH="/data/data/com.termux/files/usr64"
+BOOT_64BIT_URL="https://termux.org/bootstrap-aarch64.zip"
+
+# API 21 ARM bootstrap.
+ENV_LEGACY_32BIT_PATH="/data/data/com.termux/files/usr32-legacy"
+BOOT_LEGACY_32BIT_URL="https://termux.net/bootstrap/bootstrap-arm.zip"
+
+# API 21 AArch64 bootstrap.
+ENV_LEGACY_64BIT_PATH="/data/data/com.termux/files/usr64-legacy"
+BOOT_LEGACY_64BIT_URL="https://termux.net/bootstrap/bootstrap-aarch64.zip"
+
+CACHEDIR="/data/data/com.termux/files/home/.cache"
+BACKUP_PREFIX="/data/data/com.termux/files/stdenv"
+
+install_bootstrap() {
+	local url=$1
+	local path=$2
+	local name
+
+	set +e
+
+	(
+		set -e
+		mkdir -p "$CACHEDIR"
+
+		name=$(echo "$url" | md5sum | awk '{ print $1 }')
+		name="${CACHEDIR}/termux-boot-${name}.zip"
+
+		# Download bootstrap zip if needed.
+		if [ ! -f "$name" ]; then
+			curl --fail --location --output "$name" "$url"
+		fi
+
+		# Extract bootstrap zip.
+		mkdir -p "$path"
+		unzip -d "$path" "$name"
+		chmod 700 "$path"
+
+		cd "$path"
+
+		# Fix executable permissions.
+		find bin lib/apt lib/bash libexec -type f -print0 | xargs -0 -r chmod 700
+		local p
+		for p in ./share/doc/util-linux/getopt/getopt-parse.bash \
+			./share/doc/util-linux/getopt/getopt-parse.tcsh \
+			./var/service/ftpd/run \
+			./var/service/telnetd/run; do
+
+			if [ -f "$p" ]; then
+				chmod 700 "$p"
+			fi
+		done
+		unset p
+
+		# Create symlinks.
+		if [ -e ./SYMLINKS.txt ]; then
+			local line link dest
+			while read -r line; do
+				dest=$(echo "$line" | awk -F '←' '{ print $1 }')
+				link=$(echo "$line" | awk -F '←' '{ print $2 }')
+
+				echo "Creating symlink: $link --> $dest"
+				ln -s "$dest" "$link"
+			done < <(cat SYMLINKS.txt)
+			unset line link dest
+		fi
+	)
+
+	if [ $? -ne 0 ]; then
+		rm -rf "$path"
+		echo "[!] Failed to install environment to '$path'."
+		exit 1
+	fi
+
+	set -e
+}
+
+switch_environment() {
+	local path="$1"
+
+	case "$path" in
+		"$ENV_32BIT_PATH")
+			if [ ! -e "$ENV_32BIT_PATH" ]; then
+				echo "[*] Installing ARM bootstrap environment..."
+				install_bootstrap "$BOOT_32BIT_URL" "$ENV_32BIT_PATH"
+			fi
+			;;
+
+		"$ENV_64BIT_PATH")
+			if [ ! -e "$ENV_64BIT_PATH" ]; then
+				echo "[*] Installing AArch64 bootstrap environment..."
+				install_bootstrap "$BOOT_64BIT_URL" "$ENV_64BIT_PATH"
+			fi
+			;;
+
+		"$ENV_LEGACY_32BIT_PATH")
+			if [ ! -e "$ENV_LEGACY_32BIT_PATH" ]; then
+				echo "[*] Installing ARM legacy bootstrap environment..."
+				install_bootstrap "$BOOT_LEGACY_32BIT_URL" "$ENV_LEGACY_32BIT_PATH"
+			fi
+			;;
+
+		"$ENV_LEGACY_64BIT_PATH")
+			if [ ! -e "$ENV_LEGACY_64BIT_PATH" ]; then
+				echo "[*] Installing AArch64 legacy bootstrap environment..."
+				install_bootstrap "$BOOT_LEGACY_64BIT_URL" "$ENV_LEGACY_64BIT_PATH"
+			fi
+			;;
+
+		"$BACKUP_PREFIX")
+			if [ ! -d "$BACKUP_PREFIX" ]; then
+				echo "[*] Backup prefix is not found and can't be used."
+				exit 1
+			fi
+			;;
+	esac
+
+	# Using system utilities since $PREFIX will be removed.
+	(
+		export PATH=/system/bin
+		unset LD_PRELOAD
+		unset LD_LIBRARY_PATH
+
+		cd /data/data/com.termux/files
+
+		if [ -e "usr" ] && [ ! -L "usr" ] && [ "$path" != "$BACKUP_PREFIX" ]; then
+			echo -n "[*] Backing up \$PREFIX... "
+			rm -rf stdenv > /dev/null 2>&1 || true
+			if mv "usr" "stdenv" > /dev/null 2>&1; then
+				echo "ok"
+			else
+				echo "fail"
+				exit 1
+			fi
+
+			if [ -d "$BACKUP_PREFIX/etc/ssh" ] && [ ! -e "$path/etc/ssh" ]; then
+				echo -n "[*] Copying SSH configuration & host keys... "
+				if cp -a "$BACKUP_PREFIX/etc/ssh" "$path/etc/ssh" > /dev/null 2>&1; then
+					echo "ok"
+				else
+					echo "fail"
+					exit 1
+				fi
+			fi
+		fi
+
+		# Ensure that prefix can be removed by force setting writable
+		# permission to all files in it. Doing this only if $PREFIX is
+		# a directory.
+		[ -d "usr" ] && [ ! -L "usr" ] && chmod -R u+w "usr" > /dev/null 2>&1 || true
+
+		if [ "$path" = "$BACKUP_PREFIX" ]; then
+			if [ -d "$BACKUP_PREFIX" ]; then
+				echo -n "[*] Restoring standard \$PREFIX... "
+				if rm -rf usr > /dev/null 2>&1 && mv stdenv usr > /dev/null 2>&1; then
+					echo "ok"
+				else
+					echo "fail"
+					exit 1
+				fi
+			else
+				echo "[!] No backup prefix found."
+				exit 1
+			fi
+		else
+			echo -n "[*] Linking '$path' to new \$PREFIX... "
+			if rm -rf usr > /dev/null 2>&1 && ln -s "$path" usr > /dev/null 2>&1; then
+				echo "ok"
+			else
+				echo "failed"
+				exit 1
+			fi
+		fi
+	)
+
+	echo "[*] Done. Restart Termux application now."
+}
+
+show_usage() {
+	echo
+	echo "Usage: termux-switchenv [env name]"
+	echo
+	echo "Switch to alternate Termux environment with specified name by"
+	echo "linking custom rootfs to \$PREFIX."
+	echo
+	echo "Available environment names:"
+	echo
+	echo "  std             - Restore the standard environment and"
+	echo "                    remove all alternate."
+	echo
+	echo "  32bit           - 32-bit (ARM) environment."
+	echo "  32bit-legacy    - 32-bit (ARM) environment for Android 5/6."
+	echo "  64bit           - 64-bit (AArch64) environment."
+	echo "  64bit-legacy    - 64-bit (AArch64) environment for Android 5/6."
+	echo
+	echo "When using first time, it will rename your \$PREFIX directory to"
+	echo "'/data/data/com.termux/files/stdprefix' which can be restored"
+	echo "later by switching to environment with name 'std'."
+	echo
+}
+
+if [ $# -eq 0 ]; then
+	show_usage
+	exit 1
+fi
+
+case "$1" in
+	32bit)
+		switch_environment "$ENV_32BIT_PATH"
+		;;
+	32bit-legacy)
+		switch_environment "$ENV_LEGACY_32BIT_PATH"
+		;;
+	64bit|normal)
+		switch_environment "$ENV_64BIT_PATH"
+		;;
+	64bit-legacy)
+		switch_environment "$ENV_LEGACY_64BIT_PATH"
+		;;
+	std)
+		switch_environment "$BACKUP_PREFIX"
+		;;
+	*)
+		echo "[!] Unknown argument '$1'."
+		show_usage
+		exit 1
+		;;
+esac

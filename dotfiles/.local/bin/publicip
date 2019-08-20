@@ -1,0 +1,59 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Get public IP via https://ifconfig.co service.
+##  Dependencies: bash, curl, jq.
+##
+
+if [ "${1}" = "-h" ] || [ "${1}" = "--help" ]; then
+	echo
+	echo " Usage: publicip [OPTION]"
+	echo
+	echo " Simple client for https://ifconfig.co service."
+	echo
+	echo " Available options:"
+	echo "  --all        Print IP address and other associated"
+	echo "               information."
+	echo
+	echo "  --host       Print host name (domain)."
+	echo
+	echo "  --country    Print country."
+	echo
+	echo "  --city       Print city."
+	echo
+	echo " If no options specified, then only IP address will"
+	echo " be printed."
+	echo
+	exit 0
+fi
+
+JSON_RESP=$(curl "https://ifconfig.co/json" 2>/dev/null)
+
+if [ -z "${JSON_RESP}" ]; then
+	echo "Error while getting response." 1>&2
+	exit 1
+fi
+
+if ! jq '.' <(echo "${JSON_RESP}") >/dev/null 2>&1; then
+	echo "Error while parsing json." 1>&2
+	exit 1
+fi
+
+IP=$(echo "${JSON_RESP}" | jq --raw-output '.ip')
+HOSTNAME=$(echo "${JSON_RESP}" | jq --raw-output '.hostname')
+COUNTRY=$(echo "${JSON_RESP}" | jq --raw-output '.country')
+CITY=$(echo "${JSON_RESP}" | jq --raw-output '.city')
+
+if [ "${1}" = "--all" ]; then
+	echo "IP: ${IP}"
+	echo "Hostname: ${HOSTNAME}"
+	echo "Country: ${COUNTRY}"
+	echo "City: ${CITY}"
+elif [ "${1}" = "--host" ]; then
+	echo "${HOSTNAME}"
+elif [ "${1}" = "--country" ]; then
+	echo "${COUNTRY}"
+elif [ "${1}" = "--city" ]; then
+	echo "${CITY}"
+else
+	echo "${IP}"
+fi

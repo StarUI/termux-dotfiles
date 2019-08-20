@@ -1,0 +1,44 @@
+#!/data/data/com.termux/files/usr/bin/sh
+##
+##  Simulate UID 0.
+##  Dependencies: bash, dash, grep, proot.
+##
+
+usage()
+{
+	echo
+	echo " Usage: fakeroot [-h|--help] [COMMAND]"
+	echo
+	echo " Simulate root user."
+	echo
+}
+
+## Disable LD_PRELOAD in prooted environment.
+unset LD_PRELOAD
+
+## Set right temporary directory for proot.
+export PROOT_TMP_DIR="${TMPDIR}"
+
+## Compatibility with devices running recent versions of Android.
+export PROOT_NO_SECCOMP=1
+export USE_LINK2SYMLINK=true
+
+if grep -qP '^-.*$' <<< "${1}"; then
+	## Do not accept arguments starting with '-'.
+	## Making exceptions for '-h' and '--help'.
+	if [ "${1}" = "-h" ] || [ "${1}" = "--help" ]; then
+		usage
+		exit 0
+	else
+		echo "[!] Command name cannot begin with '-'."
+		usage
+		exit 1
+	fi
+else
+	## If no command given, use shell.
+	if [ ${#} -lt 1 ]; then
+		set -- "bash" '-l'
+	fi
+fi
+
+exec proot --kill-on-exit --root-id --link2symlink "${@}"

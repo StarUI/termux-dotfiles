@@ -1,0 +1,37 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Find all files which are not owned by any package.
+##
+##  Useful if you decide to clean your installation from
+##  various third-party stuff.
+##
+##  Dependencies: bash, coreutils, findutils, grep.
+##
+
+: "${PREFIX:=/data/data/com.termux/files/usr}"
+comm -23 \
+	<(find $PREFIX | \
+		grep -v "$PREFIX/etc/apt/apt.conf.d$" | \
+		grep -v "$PREFIX/etc/apt/preferences.d$" | \
+		grep -v "$PREFIX/run$" | \
+		grep -v "$PREFIX/tmp$" | \
+		grep -v "$PREFIX/var/cache$" | \
+		grep -v "$PREFIX/var/cache/apt$" | \
+		grep -v "$PREFIX/var/lib/apt$" | \
+		grep -v "$PREFIX/var/lib/apt/lists$" | \
+		grep -v "$PREFIX/var/lib/dpkg" | \
+		grep -v "$PREFIX/var/log/apt$" | \
+	  sort) \
+	<(cat $PREFIX/var/lib/dpkg/info/*.list | \
+		grep $PREFIX | \
+		grep -v "$PREFIX/etc/apt/apt.conf.d$" | \
+		grep -v "$PREFIX/etc/apt/preferences.d$" | \
+		grep -v "$PREFIX/run$" | \
+		grep -v "$PREFIX/tmp$" | \
+		grep -v "$PREFIX/var/cache$" | \
+		grep -v "$PREFIX/var/cache/apt$" | \
+		grep -v "$PREFIX/var/lib/apt$" | \
+		grep -v "$PREFIX/var/lib/apt/lists$" | \
+		grep -v "$PREFIX/var/lib/dpkg" | \
+		grep -v "$PREFIX/var/log/apt$" | \
+	  sort | uniq)

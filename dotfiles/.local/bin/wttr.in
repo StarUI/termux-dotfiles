@@ -1,0 +1,16 @@
+#!/data/data/com.termux/files/usr/bin/sh
+##
+##  Display weather from https://wttr.in service.
+##  Dependencies: dash, curl.
+##
+
+if [ "${1}" = "-h" ] || [ "${1}" = "--help" ]; then
+	echo
+	echo " Usage: wttr.in [-h|--help] [city|country]"
+	echo
+	echo " Show weather forecast for specified location."
+	echo
+	exit 0
+fi
+
+exec curl -H "Accept-language: en" -s "http://wttr.in/${1}"

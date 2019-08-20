@@ -1,0 +1,96 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Forward a port via UPnP.
+##  Dependencies: bash, grep, miniupnpc, termux-tools.
+##
+
+usage() {
+	echo
+	echo " Usage: addupnpfwd [internal port] (external port) (protocol)"
+	echo
+	echo " Forward port via UPnP."
+	echo
+	echo " Arguments:"
+	echo
+	echo "  internal port:"
+	echo "   Should be a port of service running on this system."
+	echo "   Mandatory."
+	echo
+	echo "  external port:"
+	echo "   A port which will be available from the Internet."
+	echo "   If not specified, then it will be the same as internal port."
+	echo
+	echo "  protocol:"
+	echo "   Can be specified to tcp, udp or both (tcp + udp)."
+	echo "   If omitted, then protocol will be set to 'both'."
+	echo
+}
+
+localip() {
+	local IPADDR
+
+	IPADDR=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}' | awk '{ print $2 }')
+	if [ ! -z "${IPADDR}" ]; then
+		echo "${IPADDR}"
+	else
+		echo "No network." 1>&2
+		exit 1
+	fi
+}
+
+if [ ! -z "${1}" ]; then
+	if ! grep -qP '^\d{1,5}$' <(echo "${1}"); then
+		echo "[!] Invalid port '${1}'."
+		usage
+		exit 1
+	else
+		INT_PORT="${1}"
+	fi
+
+	if [ ! -z "${2}" ]; then
+		if grep -qP '^\d{1,5}$' <(echo "${2}"); then
+			EXT_PORT="${2}"
+		else
+			echo "[!] Invalid port '${2}'."
+			usage
+			exit 1
+		fi
+	else
+		EXT_PORT="${1}"
+	fi
+
+	if [ ! -z "${3}" ]; then
+		if grep -qP '^tcp$|^udp$|^both$' <(echo "${3}"); then
+			if [ "${3}" = "both" ]; then
+				PROTO="tcp udp"
+			else
+				PROTO="${3}"
+			fi
+		else
+			echo "[!] Invalid protocol '${3}'."
+			usage
+			exit 1
+		fi
+	else
+		PROTO="tcp udp"
+	fi
+
+	IPADDR=$(localip)
+	if [ -z "${IPADDR}" ]; then
+		echo "[!] Unable to get a device IP address."
+		exit 1
+	fi
+
+	for protocol in ${PROTO}; do
+		echo -n "[*] Adding UPnP mapping '${INT_PORT}:${EXT_PORT}' (${protocol})... "
+		if upnpc -e "Termux/addupnpfwd" -a "${IPADDR}" "${INT_PORT}" "${EXT_PORT}" "${protocol}" > /dev/null 2>&1; then
+			echo "OK"
+		else
+			echo "FAIL"
+			exit 1
+		fi
+	done
+else
+	usage
+	exit 1
+fi

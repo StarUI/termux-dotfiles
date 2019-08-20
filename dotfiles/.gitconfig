@@ -1,0 +1,11 @@
+[user]
+	user = Leonid Plyushch
+	email = leonid.plyushch@gmail.com
+	signingkey = 3B6B548ADE5EA3BDD33CEEF045F2964132545795
+
+[alias]
+	graph = log --graph --abbrev-commit --decorate --all --format=format:\"%C(bold blue)%h%C(reset) - %C(bold cyan)%aD%C(dim white) - %an%C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n %C(white)%s%C(reset)\"
+	last = log -1 --stat --show-signature
+
+[commit]
+	gpgsign = true

@@ -1,0 +1,26 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  A script for simplifying saving of URLs to Internet Archive.
+##  Dependencies: bash, curl, gawk, grep.
+##
+
+if [ $# -ge 1 ]; then
+	for url in "$@"; do
+		LOCATION=$(curl -sI "https://web.archive.org/save/$url" | grep "^content-location:" | awk '{ print $2 }')
+
+		if [ -n "$LOCATION" ]; then
+			echo "archived: https://web.archive.org$LOCATION"
+		else
+			echo "failed: $url"
+		fi
+	done
+else
+	echo
+	echo "Usage: webarchive-save [URL] ..."
+	echo
+	echo "Send request to Internet Archive to save specified"
+	echo "URLs."
+	echo
+
+	exit 1
+fi

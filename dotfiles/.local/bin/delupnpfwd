@@ -1,0 +1,63 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Remove UPnP port forwarding added by "addupnpfwd".
+##  Dependencies: bash, grep, miniupnpc.
+##
+
+usage()
+{
+	echo
+	echo " Usage: delupnpfwd [external port] (protocol)"
+	echo
+	echo " Remove UPnP forwarding for specified port."
+	echo
+	echo " Arguments:"
+	echo
+	echo "  external port:"
+	echo "   Publically available port that should be removed."
+	echo "   Mandatory."
+	echo
+	echo "  protocol:"
+	echo "   Can be specified to tcp, udp or both (tcp + udp)."
+	echo "   If omitted, then protocol will be set to 'both'."
+	echo
+}
+
+if [ ! -z "${1}" ]; then
+	if grep -qP '^\d{1,5}$' <(echo "${1}"); then
+		EXT_PORT="${1}"
+	else
+		echo "[!] Invalid port '${1}'."
+		usage
+		exit 1
+	fi
+
+	if [ ! -z "${2}" ]; then
+		if grep -qP '^tcp$|^udp$|^both$' <(echo "${2}"); then
+			if [ "${2}" = "both" ]; then
+				PROTO="tcp udp"
+			else
+				PROTO="${2}"
+			fi
+		else
+			echo "[!] Invalid protocol '${2}'."
+			usage
+			exit 1
+		fi
+	else
+		PROTO="tcp udp"
+	fi
+
+	for protocol in ${PROTO}; do
+		echo -n "[*] Removing UPnP mapping for '${EXT_PORT}' (${protocol})... "
+		if upnpc -d "${EXT_PORT}" "${protocol}" > /dev/null 2>&1; then
+			echo "OK"
+		else
+			echo "FAIL"
+			exit 1
+		fi
+	done
+else
+	usage
+	exit 1
+fi

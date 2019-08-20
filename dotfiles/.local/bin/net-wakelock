@@ -1,0 +1,10 @@
+#!/data/data/com.termux/files/usr/bin/sh
+##
+##  Start continuous ping to keep Wi-Fi at high-perf rate.
+##  Dependencies: dash, termux-tools.
+##
+
+: "${WIFI_ROUTER_IP:="192.168.1.1"}"
+
+termux-wake-lock
+exec ping -i 0.3 -s 32 "$WIFI_ROUTER_IP"

@@ -1,0 +1,92 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Find missing shared libraries.
+##  Dependencies: bash, binutils, coreutils, file, findutils.
+##
+
+if [ "${1}" = "-h" ] || [ "${1}" = "--help" ]; then
+	echo
+	echo " Usage: linkchk [-h|--help]"
+	echo
+	echo " Check integrity of dynamic linking."
+	echo
+	exit 0
+fi
+
+unset LD_PRELOAD
+BINARIES=()
+LIBRARIES_NOT_FOUND=()
+
+find_binaries()
+{
+	local COUNTER=0
+	local TARGETS=()
+	local TARGET_COUNT=0
+
+	for target in $(find ${PREFIX}/bin ${PREFIX}/libexec -type f); do
+		TARGETS+=("${target}")
+		TARGET_COUNT=$((TARGET_COUNT + 1))
+	done
+
+	for target in $(find ${PREFIX}/lib -type f -regex '.+\.so\(\.[0-9\.]+\)?$'); do
+		TARGETS+=("${target}")
+		TARGET_COUNT=$((TARGET_COUNT + 1))
+	done
+
+	for target in ${TARGETS[*]}; do
+		if [ ! -z "$(file -e apptype -e ascii -e cdf -e compress -e elf -e encoding -e tar -e text -e tokens ${target} | grep ELF)" ]; then
+			BINARIES+=("${target}")
+		fi
+
+		COUNTER=$((COUNTER + 1))
+		echo -ne "\r=== gathering ELF binaries [ $((COUNTER * 100 / TARGET_COUNT))% ]"
+	done
+	echo
+}
+
+get_solibs()
+{
+	objdump -p "${1}" | grep NEEDED | cut -d ' ' -f 18
+}
+
+check_linking()
+{
+	local BINARIES_COUNT=${#BINARIES[*]}
+	local COUNTER
+	local LIBS
+
+	for binary in ${BINARIES[*]}; do
+		LIBS=$(get_solibs ${binary} 2>/dev/null)
+
+		if [ ! -z "${LIBS}" ]; then
+			for lib in ${LIBS}; do
+				lib=$(basename ${lib})
+				if [ ! -e "${PREFIX}/lib/${lib}" ] && \
+				   [ ! -e "/system/lib64/${lib}" ]; then
+						LIBRARIES_NOT_FOUND+=("${lib}")
+				fi
+			done
+		fi
+
+		COUNTER=$((COUNTER + 1))
+		echo -ne "\r=== checking dynamic linking consistency [ $((COUNTER * 100 / BINARIES_COUNT))% ]"
+	done
+	echo
+}
+
+echo
+find_binaries
+check_linking
+
+if [ "${#LIBRARIES_NOT_FOUND[*]}" = 0 ]; then
+	echo
+	exit 0
+else
+	echo "=== libraries not found:"
+	( for lib in ${LIBRARIES_NOT_FOUND[*]}; do
+		echo " * ${lib}"
+	done ) | sort | uniq
+	echo
+
+	exit 0
+fi

@@ -1,0 +1,20 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Verifies integrity of installed packages if possible.
+##  Dependencies: bash, coreutils, grep.
+##
+
+set -e
+
+: "${PREFIX:="/data/data/com.termux/files/usr"}"
+PKG_MD5SUMS="$PREFIX/tmp/.packages.md5sums"
+
+trap "rm -f $PKG_MD5SUMS" INT QUIT EXIT
+
+echo "[*] Reading MD5 checksums from dpkg database..."
+cat "$PREFIX/var/lib/dpkg/info"/*.md5sums | \
+	sed "s@ data/data/@ /data/data/@g" | \
+	grep -v "usr/etc/" | sort -k2 > "$PKG_MD5SUMS"
+
+echo "[*] Verifying integrity of package files..."
+md5sum -c "$PKG_MD5SUMS"

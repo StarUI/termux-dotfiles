@@ -1,0 +1,63 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Automatically generate TERMUX_PKG_DEPENDS for package.
+##  Dependencies: coreutils, dpkg, grep, patchelf.
+##
+
+set -e -u
+
+SINGLE_PACKAGE=false
+
+main() {
+	local bin
+	local so_needed=""
+	local solib
+
+	for bin in $(dpkg -L "$1" | grep -P "^/data/data/com.termux/files/usr/(bin|lib|libexec)"); do
+		if [ -f "$bin" ]; then
+			solib=$(patchelf --print-needed "$bin" 2>/dev/null || true)
+			so_needed+=" $solib"
+		fi
+	done
+
+	local packages_resolved=""
+	local temp=""
+
+	for solib in $(echo "$so_needed" | tr ' ' '\n' | sort | uniq); do
+		temp=$(dpkg -S "/data/data/com.termux/files/usr/lib/$solib" 2>/dev/null | cut -d: -f1)
+		if [ "$temp" != "$1" ]; then
+			packages_resolved+="$temp "
+		fi
+	done
+
+	local output
+
+	output=$(for pkg in $(echo "$packages_resolved" | tr ' ' '\n' | sort | uniq); do echo -n "$pkg, "; done; echo)
+
+	if $SINGLE_PACKAGE; then
+		echo "TERMUX_PKG_DEPENDS=\"${output%%, }\""
+	else
+		echo "${1}:TERMUX_PKG_DEPENDS=\"${output%%, }\""
+	fi
+}
+
+show_usage() {
+	echo
+	echo "Usage: termux-autodep [package name] ..."
+	echo
+	echo "Generate TERMUX_PKG_DEPENDS for specified packages."
+	echo
+}
+
+if [ $# -eq 0 ]; then
+	show_usage
+	exit 1
+fi
+
+if [ $# -eq 1 ]; then
+	SINGLE_PACKAGE=true
+fi
+
+for i in "$@"; do
+	main "$i"
+done

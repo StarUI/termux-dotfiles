@@ -1,0 +1,17 @@
+#!/data/data/com.termux/files/usr/bin/sh
+##
+##  Get the IP address of device/gateway.
+##  Dependencies: dash, gawk, grep, termux-tools.
+##
+
+## This should be an IP from somewhere on the Internet.
+## Google DNS (8.8.8.8) should be a good choice.
+PUBLIC_IP="8.8.8.8"
+
+IPADDR=$(ip route get ${PUBLIC_IP} 2>/dev/null | grep -oP 'src \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}' | awk '{ print $2 }')
+if [ ! -z "${IPADDR}" ]; then
+	echo "${IPADDR}"
+else
+	echo "No network." 1>&2
+	exit 1
+fi

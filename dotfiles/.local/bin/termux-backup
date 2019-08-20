@@ -1,0 +1,300 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  Backup and restore Termux ($HOME or $PREFIX).
+##  Dependencies: bash, coreutils, grep, openssh (optional), restic.
+##
+
+set -e -u
+
+# Resetting Termux-specific variables to make sure
+# that they are correct.
+export HOME="/data/data/com.termux/files/home"
+export PREFIX="/data/data/com.termux/files/usr"
+
+# Default configuration.
+PROCESS_HOME=false
+RESTORE_MODE=false
+SNAPSHOT_TO_RESTORE=latest
+
+# Set tags used for backups.
+: "${TERMUX_PREFIX_TAG:="termux"}"
+: "${TERMUX_HOME_TAG:="termux-home"}"
+
+# Lock terminal.
+block_terminal() {
+	stty -echo -icanon time 0 min 0
+	stty intr undef quit undef susp undef
+}
+
+# Unlock terminal.
+unblock_terminal() {
+	while read -r; do
+		true;
+	done
+	stty sane
+}
+
+perform_restore() {
+	local prefix_tmp_dir home_tmp_dir
+
+	if "$PROCESS_HOME"; then
+		echo "[*] Fetching data of snapshot '$SNAPSHOT_TO_RESTORE' with tag '$TERMUX_HOME_TAG'..." >&2
+		home_tmp_dir=$(mktemp -d -p "/data/data/com.termux/files" "restore.XXXXXXXX")
+
+		trap "rm -rf "$home_tmp_dir" > /dev/null 2>&1" INT QUIT EXIT
+		if ! restic restore --tag "$TERMUX_HOME_TAG" --target "$home_tmp_dir" "$SNAPSHOT_TO_RESTORE"; then
+			exit 1
+		fi
+		trap - INT QUIT EXIT
+	else
+		echo "[*] Fetching data of snapshot '$SNAPSHOT_TO_RESTORE' with tag '$TERMUX_PREFIX_TAG'..." >&2
+		prefix_tmp_dir=$(mktemp -d -p "/data/data/com.termux/files" "restore.XXXXXXXX")
+
+		trap "rm -rf "$prefix_tmp_dir" > /dev/null 2>&1" INT QUIT EXIT
+		if ! restic restore --tag "$TERMUX_PREFIX_TAG" --target "$prefix_tmp_dir" "$SNAPSHOT_TO_RESTORE"; then
+			exit 1
+		fi
+		trap - INT QUIT EXIT
+	fi
+
+	# Actual restoring is done in subshell since variables
+	# like PATH may be changed in some steps.
+	# Terminal is locked here so text input, ctrl-c
+	# or similar are not working here.
+	block_terminal
+	(
+		if "$PROCESS_HOME"; then
+			cd "/data/data/com.termux/files" > /dev/null 2>&1 || true
+
+			echo -n "[*] Removing old \$HOME... " >&2
+			chmod -R 700 "$HOME" > /dev/null 2>&1 || true
+			if rm -rf "$HOME" > /dev/null 2>&1; then
+				echo "ok" >&2
+			else
+				echo "fail" >&2
+				unblock_terminal
+				echo "[!] Something went wrong and your \$HOME is inconsistent now." >&2
+				exit 1
+			fi
+
+			echo -n "[*] Creating new \$HOME... " >&2
+			if mv "$home_tmp_dir/$HOME" "$HOME" > /dev/null 2>&1; then
+				echo "ok" >&2
+			else
+				echo "fail" >&2
+				unblock_terminal
+				echo "[!] Something went wrong and your \$HOME is inconsistent now." >&2
+				exit 1
+			fi
+
+			# Remove home restore directory.
+			rm -rf "$home_tmp_dir" > /dev/null 2>&1 || true
+		else
+			# Use failsafe environment.
+			export PATH="/system/bin:/system/xbin"
+			unset LD_PRELOAD LD_LIBRARY_PATH
+			hash -r
+
+			# Delete prefix.
+			echo -n "[*] Removing old \$PREFIX... " >&2
+			chmod -R 700 "$PREFIX" > /dev/null 2>&1 || true
+			if rm -rf "$PREFIX" > /dev/null 2>&1; then
+				echo "ok" >&2
+			else
+				echo "fail" >&2
+				echo "[!] Something went wrong and your \$PREFIX is broken now." >&2
+				exit 1
+			fi
+
+			# Move restored prefix to the correct location.
+			echo -n "[*] Creating new \$PREFIX... " >&2
+			if mv "$prefix_tmp_dir/$PREFIX" "$PREFIX" > /dev/null 2>&1; then
+				echo "ok" >&2
+			else
+				echo "fail" >&2
+				echo "[!] Something went wrong and your \$PREFIX is broken now." >&2
+				exit 1
+			fi
+
+			# Remove prefix restore directory.
+			rm -rf "$prefix_tmp_dir" > /dev/null 2>&1 || true
+		fi
+	)
+	unblock_terminal
+	echo "[*] Finished." >&2
+}
+
+perform_backup() {
+	if "$PROCESS_HOME"; then
+		echo "[*] Backing up Termux home..." >&2
+		if ! restic backup --tag termux-home \
+				--exclude="$HOME/.ICEauthority" \
+				--exclude="$HOME/.Xauthority" \
+				--exclude="$HOME/.cache" \
+				--exclude="$HOME/.cargo" \
+				--exclude="$HOME/.*_history" \
+				--exclude="$HOME/.lesshst" \
+				--exclude="$HOME/.tor/cached-*" \
+				--exclude="$HOME/.tor/diff" \
+				--exclude="$HOME/.tor/lock" \
+				--exclude="$HOME/.tor/state" \
+				--exclude="$HOME/.zhistory" \
+				--exclude="$HOME/.wget-hsts" \
+				--exclude="$HOME/storage" \
+				"$HOME"; then
+			return 1
+		fi
+	else
+		echo "[*] Backing up Termux prefix..." >&2
+		if ! restic backup --tag termux \
+				--exclude="$PREFIX/lib/python*/**/__pycache__" \
+				--exclude="$PREFIX/lib/python*/**/*.pyc" \
+				--exclude="$PREFIX/lib/python*/**/*.pyo" \
+				--exclude="$PREFIX/tmp/*" \
+				--exclude="$PREFIX/var/android/*" \
+				--exclude="$PREFIX/var/cache/apt/*" \
+				--exclude="$PREFIX/var/lib/apt/lists/*" \
+				--exclude="$PREFIX/var/lib/clamav/*" \
+				--exclude="$PREFIX/var/lib/nginx/client-body/*" \
+				--exclude="$PREFIX/var/lib/nginx/fastcgi/*" \
+				--exclude="$PREFIX/var/lib/nginx/proxy/*" \
+				--exclude="$PREFIX/var/lib/nginx/scgi/*" \
+				--exclude="$PREFIX/var/lib/nginx/uwsgi/*" \
+				--exclude="$PREFIX/var/lib/tor/cached-*" \
+				--exclude="$PREFIX/var/lib/tor/diff" \
+				--exclude="$PREFIX/var/lib/tor/lock" \
+				--exclude="$PREFIX/var/lib/tor/state" \
+				--exclude="$PREFIX/var/run/*.pid" \
+				--exclude="$PREFIX/var/run/*.sock" \
+				"$PREFIX"; then
+			exit 1
+		fi
+	fi
+	echo "[*] Finished." >&2
+}
+
+show_usage() {
+	{
+		echo
+		echo "Usage: termux-backup [OPTIONS]"
+		echo
+		echo "Termux backup/restore frontend for Restic."
+		echo
+		echo "Options:"
+		echo
+		echo "  --home"
+		echo
+		echo "      Backup or restore home directory"
+		echo "      instead of prefix."
+		echo
+		echo "  -r, --restore (snapshot)"
+		echo
+		echo "      Enable restore mode. Will completely"
+		echo "      overwrite files by ones from backup."
+		echo
+		echo "      You can restore a specific snapshot if its"
+		echo "      name (hash) was specified. If not, a latest"
+		echo "      snapshot will be used."
+		echo
+		echo "  -h, --help"
+		echo
+		echo "      Show this help message."
+		echo
+		echo "Credentials are specified via environment"
+		echo "variables:"
+		echo
+		echo "  RESTIC_REPOSITORY  - backup repository location."
+		echo "  RESTIC_PASSWORD    - encryption password."
+		echo
+		echo "You can override tag names by these environment"
+		echo "variables:"
+		echo
+		echo "  TERMUX_HOME_TAG    - home backup tag."
+		echo "  TERMUX_PREFIX_TAG  - prefix backup tag."
+		echo
+		echo "Instead of specifying variables globally, you can"
+		echo "define them in script file '~/.restic_env'."
+		echo
+	} >&2
+}
+
+while (($# > 0)); do
+	case "$1" in
+		--home)
+			PROCESS_HOME=true
+			;;
+		-h|--help)
+			show_usage
+			exit 0
+			;;
+		-r|--restore)
+			RESTORE_MODE=true
+			if [ $# -gt 1 ] && [[ $2 != -* ]]; then
+				SNAPSHOT_TO_RESTORE=$2
+				shift 1
+
+				if ! grep -qP '^(?:[a-f0-9]{8,64}|latest)$' <(echo "$SNAPSHOT_TO_RESTORE"); then
+					{
+						echo "[!] Invalid snapshot ID specified."
+						echo
+						echo "    Valid snapshot ID consist of 8-64 lowercase"
+						echo "    letters from range [a-f] and numbers [0-9]."
+						echo
+						echo "    If you specify snapshot ID as 'latest', then"
+						echo "    latest snapshot will be used."
+						echo
+					} >&2
+					exit 1
+				fi
+			fi
+			;;
+		*)
+			if [[ $1 == -* ]]; then
+				echo "[!] Invalid option '$1'." >&2
+			else
+				echo "[!] Unexpected argument '$1'." >&2
+			fi
+			show_usage
+			exit 1
+			;;
+	esac
+	shift 1
+done
+
+if [ -z "$(command -v restic)" ]; then
+	echo "[!] Error: restic is not installed." >&2
+	exit 1
+fi
+
+if [ -r "$HOME/.restic_env" ]; then
+	. "$HOME/.restic_env"
+fi
+
+if [ -z "$RESTIC_REPOSITORY" ]; then
+	echo "[!] Error: variable 'RESTIC_REPOSITORY' is not set." >&2
+	exit 1
+fi
+
+if [ -z "$RESTIC_PASSWORD" ]; then
+	echo "[!] Error: variable 'RESTIC_PASSWORD' is not set." >&2
+	exit 1
+fi
+
+if "$RESTORE_MODE"; then
+	if "$PROCESS_HOME"; then
+		echo "[!] Restoring mode will overwrite all your data in \$HOME." >&2
+	else
+		echo "[!] Restoring mode will overwrite all your data in \$PREFIX." >&2
+	fi
+	read -re -p "[@] Do you want to proceed ? (YES/no): " CHOICE >&2
+
+	if [ "$CHOICE" != "YES" ]; then
+		echo "[!] Aboring restore." >&2
+		exit 1
+	fi
+	unset CHOICE
+
+	perform_restore
+else
+	perform_backup
+fi

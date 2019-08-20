@@ -1,0 +1,12 @@
+#!/data/data/com.termux/files/usr/bin/sh
+## This file is executed during VNC server
+## startup.
+
+# Make sure that current directory is HOME.
+cd "$HOME"
+
+# Generate menu.
+fluxbox-generate_menu
+
+# Start fluxbox.
+fluxbox &

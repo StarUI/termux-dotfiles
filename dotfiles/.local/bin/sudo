@@ -1,0 +1,210 @@
+#!/data/data/com.termux/files/usr/bin/bash
+##
+##  A wrapper for the 'su' utility from Lineage OS.
+##  Dependencies: bash, coreutils, gawk.
+##
+
+set -e
+
+PREFIX="/data/data/com.termux/files/usr"
+
+declare -a SU_ARGS SU_ENV
+
+SU_SHELL="/system/bin/sh"
+SU_PRESERVE_ENVIRONMENT=false
+SU_RUN_IN_BACKGROUND=false
+SU_USE_LOGIN_SHELL=false
+SU_USER="root"
+SU_PATH="/system/xbin/su"
+
+show_usage() {
+	{
+		echo
+		echo "Usage: sudo [options] <command>"
+		echo
+		echo "Execute command as a root or another user."
+		echo
+		echo "Options:"
+		echo
+		echo "  -h, --help                 Show this help information."
+		echo
+		echo "  -b, --background           Run command in background."
+		echo
+		echo "  -E, --preserve-env         Preserve user environment when"
+		echo "                             running command."
+		echo
+		echo "  -i, --login                Execute command under login shell."
+		echo
+		echo "  -s, --shell <shell>        Run a <shell> instead of a default."
+		echo
+		echo "  -u, --user <user>          Run command as specified user."
+		echo
+		echo "  --                         Stop processing command line arguments."
+		echo
+		echo "Default shell for 'root' and '$(whoami)' is '\$PREFIX/bin/bash'."
+		echo "Other users will use '/system/bin/sh' as default shell."
+		echo
+	} >&2
+}
+
+if [ ! -e "$SU_PATH" ] || [ ! -x "$SU_PATH" ]; then
+	echo "Utility '$SU_PATH' is not found on your OS." >&2
+	exit 1
+fi
+
+if [[ $("$SU_PATH" -v | awk '{ print $2 }') != cm-su ]]; then
+	echo "Your 'su' binary isn't from Lineage OS addonsu." >&2
+	exit 1
+fi
+
+while (($# > 0)); do
+	case "$1" in
+		-h|--help)
+			show_usage
+			exit 0
+			;;
+		-b|--background)
+			SU_RUN_IN_BACKGROUND=true
+			;;
+		-E|--preserve-env)
+			SU_PRESERVE_ENVIRONMENT=true
+			;;
+		-i|--login)
+			SU_USE_LOGIN_SHELL=true
+			;;
+		-s|--shell)
+			if [ $# -gt 1 ] && [[ $2 != -* ]]; then
+				if [ -n "$2" ]; then
+					if [ -f "$2" ] && [ -x "$2" ]; then
+						SU_SHELL="$2"
+						shift 1
+					else
+						echo "Cannot use '$2' as shell." >&2
+						show_usage
+						exit 1
+					fi
+				else
+					echo "Shell cannot be empty." >&2
+					show_usage
+					exit 1
+				fi
+			else
+				echo "Option '--shell' requires an argument." >&2
+				show_usage
+				exit 1
+			fi
+			;;
+		-u|--user)
+			if [ $# -gt 1 ] && [[ $2 != -* ]]; then
+				if [ -n "$2" ]; then
+					if id -u "$2" > /dev/null 2>&1; then
+						SU_USER="$2"
+						shift 1
+					else
+						echo "Invalid user '$2'." >&2
+						exit 1
+					fi
+				else
+					echo "User name cannot be empty." >&2
+					show_usage
+					exit 1
+				fi
+			else
+				echo "Option '--user' requires an argument." >&2
+				show_usage
+				exit 1
+			fi
+			;;
+		--)
+			shift 1
+			SU_ARGS+=("$@")
+			break
+			;;
+		*)
+			if [[ $1 != -* ]]; then
+				SU_ARGS+=("$@")
+				break
+			else
+				echo "Unknown option '$1'." >&2
+				show_usage
+				exit 1
+			fi
+			;;
+	esac
+	shift 1
+done
+
+if [ $# -ge 1 ]; then
+	SU_ARGS=("$@")
+else
+	echo "No command to execute." >&2
+	show_usage
+	exit 1
+fi
+
+# Do not preload libraries under su.
+unset LD_PRELOAD
+
+# Append system utilities in case if target user won't be able to
+# use Termux environment due to permission issues.
+export PATH="$PATH:/system/bin:/system/xbin"
+
+# Discard su's shell history.
+# Note that shell's rc files may override this.
+SU_ENV+=("HISTFILE=/dev/null")
+
+# For login shell a clean environment will be used.
+if $SU_USE_LOGIN_SHELL || ! $SU_PRESERVE_ENVIRONMENT; then
+	SU_ENV+=("ANDROID_DATA=/data")
+	SU_ENV+=("ANDROID_ROOT=/system")
+	SU_ENV+=("EXTERNAL_STORAGE=${EXTERNAL_STORAGE}")
+	SU_ENV+=("LANG=${LANG}")
+	SU_ENV+=("TERM=${TERM}")
+
+	if [ "$(id -u "$SU_USER")" != "0" ] && [ "$(id -u "$SU_USER")" != "$(id -u)" ]; then
+		# If user id is not current or 0 (root), user can't access the Termux
+		# environment.
+		SU_ENV+=("HOME=/")
+		SU_ENV+=("PATH=/system/bin:/system/xbin")
+	else
+		SU_ENV+=("HOME=/data/data/com.termux/files/home")
+		SU_ENV+=("PATH=${PREFIX}/bin:${PREFIX}/bin/applets:/system/bin:/system/xbin")
+		SU_ENV+=("PREFIX=${PREFIX}")
+		SU_ENV+=("TMPDIR=${PREFIX}/tmp")
+	fi
+else
+	while read -r envvar; do
+		SU_ENV+=("$envvar")
+	done < <(printenv)
+fi
+
+for ((i=0; i<${#SU_ARGS[@]}; i++)); do
+	SU_ARGS[$i]="\"${SU_ARGS[$i]}\""
+done
+
+if $SU_USE_LOGIN_SHELL; then
+	set -- "cd \"\$HOME\"; unset OLDPWD; ${SU_ARGS[*]}"
+	SU_USE_LOGIN_SHELL="-l"
+else
+	set -- "cd \"$PWD\"; OLDPWD=\"$OLDPWD\"; ${SU_ARGS[*]}"
+	SU_USE_LOGIN_SHELL=""
+fi
+
+set +e
+
+RET=0
+
+echo -ne "\\a" >&2
+
+if $SU_RUN_IN_BACKGROUND; then
+	exec "$SU_PATH" -p -- "$SU_USER" -- \
+		/system/bin/env -i "${SU_ENV[@]}" "$SU_SHELL" $SU_USE_LOGIN_SHELL -c "${*}" &
+else
+	"$SU_PATH" -p -- "$SU_USER" -- \
+		/system/bin/env -i "${SU_ENV[@]}" "$SU_SHELL" $SU_USE_LOGIN_SHELL -c "${*}"
+	RET=$?
+fi
+
+stty sane
+
+exit $RET
